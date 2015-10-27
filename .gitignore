@@ -1,7 +1,1 @@
-**/target
-*.iml
-
-.classpath
-.project
-.settings/
-.idea/
+/target/

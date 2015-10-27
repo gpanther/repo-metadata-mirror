@@ -12,6 +12,7 @@ public final class MirroredEntity {
     Long id;
 
     Date retrievedAt;
+    Date lastModified;
     String url;
     boolean successfullyRetrieved;
     @Serialize(zip = true, compressionLevel = 9)
@@ -26,8 +27,9 @@ public final class MirroredEntity {
         this.successfullyRetrieved = false;
     }
 
-    MirroredEntity(String url, byte[] body) {
+    MirroredEntity(String url, byte[] body, Date lastModified) {
         this.retrievedAt = new Date();
+        this.lastModified = lastModified;
         this.url = url;
         this.successfullyRetrieved = true;
         this.body = body;

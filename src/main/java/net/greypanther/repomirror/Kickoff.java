@@ -9,6 +9,8 @@ import javax.servlet.http.HttpServlet;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 
+import com.google.appengine.api.memcache.MemcacheService;
+import com.google.appengine.api.memcache.MemcacheServiceFactory;
 import com.google.appengine.api.taskqueue.Queue;
 import com.google.appengine.api.taskqueue.QueueFactory;
 import com.google.appengine.api.taskqueue.RetryOptions;
@@ -32,6 +34,11 @@ public final class Kickoff extends HttpServlet {
     @Override
     public void doPost(HttpServletRequest req, HttpServletResponse resp) throws IOException {
         checkUser();
+
+        MemcacheService memcache = MemcacheServiceFactory.getMemcacheService();
+        for (Counter.Key key : Counter.Key.values()) {
+            Counter.reset(key, memcache);
+        }
 
         Queue queue = QueueFactory.getDefaultQueue();
         queueStartTask(queue, "repo1.maven.org", "https://repo1.maven.org/maven2/");

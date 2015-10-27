@@ -3,8 +3,10 @@ package net.greypanther.repomirror;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.Charset;
+import java.util.Date;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -17,6 +19,8 @@ import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
 
 import com.google.appengine.api.NamespaceManager;
+import com.google.appengine.api.memcache.MemcacheService;
+import com.google.appengine.api.memcache.MemcacheServiceFactory;
 import com.google.appengine.api.taskqueue.Queue;
 import com.google.appengine.api.taskqueue.QueueFactory;
 import com.google.common.io.ByteStreams;
@@ -41,14 +45,18 @@ public final class Mirror extends HttpServlet {
             return;
         }
 
-        byte[] content = download(url);
+        MemcacheService memcache = MemcacheServiceFactory.getMemcacheService();
+
+        Counter.increment(Counter.Key.ATTEMPTS, memcache);
+        DownloadedInfo content = download(url);
         if (shouldBeStored(url)) {
-            save(namespace, new MirroredEntity(url, content));
+            save(namespace, new MirroredEntity(url, content.content, content.lastModified));
+            Counter.increment(Counter.Key.STORED, memcache);
             return;
         }
 
         Queue queue = QueueFactory.getDefaultQueue();
-        Document doc = Jsoup.parse(new String(content, CHARSET), url);
+        Document doc = Jsoup.parse(new String(content.content, CHARSET), url);
         for (Element link : doc.select("a")) {
             String href = link.attr("abs:href");
 
@@ -67,6 +75,7 @@ public final class Mirror extends HttpServlet {
                 continue;
             }
 
+            Counter.increment(Counter.Key.ENQUEUED, memcache);
             Kickoff.queueStartTask(queue, namespace, href);
         }
     }
@@ -94,20 +103,34 @@ public final class Mirror extends HttpServlet {
                 || lowerCaseUrl.endsWith(".sha1");
     }
 
-    private byte[] download(String url) throws IOException {
+    private DownloadedInfo download(String urlString) throws IOException {
+        URL url = new URL(urlString);
+        HttpURLConnection connection = (HttpURLConnection) url.openConnection();
+
         ByteArrayOutputStream out = new ByteArrayOutputStream(64 * 1024);
-        URL urlUrl = new URL(url);
-        try (InputStream urlStream = urlUrl.openStream()) {
+        try (InputStream urlStream = connection.getInputStream()) {
             ByteStreams.copy(urlStream, out);
         } catch (IOException ex) {
             LOG.log(Level.WARNING, String.format("Exception while downloading %s: %s", url, ex.getMessage()), ex);
             throw ex;
         }
-        return out.toByteArray();
+
+        Date lastModified = connection.getLastModified() == 0 ? null : new Date(connection.getLastModified());
+        return new DownloadedInfo(out.toByteArray(), lastModified);
     }
 
     private int getRetryCount(HttpServletRequest req) {
         String s = req.getHeader("X-AppEngine-TaskExecutionCount");
         return s == null ? 0 : Integer.parseInt(s);
+    }
+
+    private static final class DownloadedInfo {
+        private final byte[] content;
+        private final Date lastModified;
+
+        private DownloadedInfo(byte[] content, Date lastModified) {
+            this.content = content;
+            this.lastModified = lastModified;
+        }
     }
 }
